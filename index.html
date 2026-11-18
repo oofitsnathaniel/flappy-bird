@@ -520,13 +520,28 @@ function draw(name, x, y) {
 }
 
 function drawPipe(pipe, alpha) {
-  const x = Math.round(pipe.previousX + (pipe.x - pipe.previousX) * alpha);
-  draw(pipeArt, x, pipe.top + gap);
-  ctx.save();
-  ctx.translate(x + pipeWidth, pipe.top);
-  ctx.rotate(Math.PI);
-  draw(pipeArt, 0, 0);
-  ctx.restore();
+  const interpolatedX = pipe.previousX + (pipe.x - pipe.previousX) * alpha;
+  if (isMobileDevice) {
+    // On high-density Safari canvases, rounding to whole world pixels makes
+    // the pipe jump in uneven *screen* pixel increments. Snap to the actual
+    // canvas backing-pixel grid instead, without changing physics/hitboxes.
+    const x = (Math.round(viewOffsetX + interpolatedX * renderScale) - viewOffsetX) / renderScale;
+    ctx.drawImage(art[pipeArt], x, pipe.top + gap);
+    ctx.save();
+    ctx.translate(x + pipeWidth, pipe.top);
+    ctx.rotate(Math.PI);
+    ctx.drawImage(art[pipeArt], 0, 0);
+    ctx.restore();
+  } else {
+    // Preserve the existing desktop rendering exactly.
+    const x = Math.round(interpolatedX);
+    draw(pipeArt, x, pipe.top + gap);
+    ctx.save();
+    ctx.translate(x + pipeWidth, pipe.top);
+    ctx.rotate(Math.PI);
+    draw(pipeArt, 0, 0);
+    ctx.restore();
+  }
 }
 
 function drawBird(alpha) {
