@@ -295,7 +295,8 @@ function resize() {
   const viewportWidth = Math.max(1, canvas.clientWidth);
   const viewportHeight = Math.max(1, canvas.clientHeight);
   // In low-power mode cap the backing surface; never change world coordinates.
-  const pixelRatio = lowPower ? Math.min(window.devicePixelRatio || 1, 1.5) : (window.devicePixelRatio || 1);
+  const deviceRatio = window.devicePixelRatio || 1;
+  const pixelRatio = isMobileDevice || lowPower ? Math.min(deviceRatio, 1.5) : deviceRatio;
   lastDisplayWidth = viewportWidth; lastDisplayHeight = viewportHeight;
   const backingWidth = Math.round(viewportWidth * pixelRatio);
   const backingHeight = Math.round(viewportHeight * pixelRatio);
@@ -709,7 +710,8 @@ async function start() {
     if(menuOpen) elapsed=0;
     // requestAnimationFrame stays synchronized to display refresh on Auto.
     // Explicit caps skip drawing only; physics keeps its original cadence.
-    const effectiveLimit = lowPower ? Math.min(60, frameLimit === "auto" ? 60 : Number(frameLimit)) : (frameLimit === "auto" ? 0 : Number(frameLimit));
+    const requestedLimit = frameLimit === "auto" ? 0 : Number(frameLimit);
+    const effectiveLimit = lowPower && !isMobileDevice ? Math.min(60, requestedLimit || 60) : requestedLimit;
     const drawInterval = effectiveLimit ? 1000 / effectiveLimit : 0;
     if (!previousDraw || now - previousDraw >= drawInterval - 0.5) {
       if (previousDraw && !paused) {
