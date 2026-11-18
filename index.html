@@ -477,9 +477,14 @@ function draw(name, x, y) {
   ctx.drawImage(art[name], Math.round(x), Math.round(y));
 }
 
+function snapMotion(position, offset) {
+  if (!isMobileDevice) return Math.round(position);
+  return (Math.round(position * renderScale + offset) - offset) / renderScale;
+}
+
 function drawPipe(pipe, alpha) {
-  const x = Math.round(pipe.previousX + (pipe.x - pipe.previousX) * alpha);
-  draw(pipeArt, x, pipe.top + gap);
+  const x = snapMotion(pipe.previousX + (pipe.x - pipe.previousX) * alpha, viewOffsetX);
+  ctx.drawImage(art[pipeArt], x, pipe.top + gap);
   ctx.save();
   ctx.translate(x + pipeWidth, pipe.top);
   ctx.rotate(Math.PI);
@@ -489,7 +494,7 @@ function drawPipe(pipe, alpha) {
 
 function drawBird(alpha) {
   ctx.save();
-  ctx.translate(birdX, Math.round(previousY + (y - previousY) * alpha));
+  ctx.translate(birdX, snapMotion(previousY + (y - previousY) * alpha, viewOffsetY));
   ctx.rotate((previousAngle + (angle - previousAngle) * alpha) * Math.PI / 180);
   ctx.drawImage(birdFrameArt[color][flapFrame], -17, -12);
   ctx.restore();
@@ -552,7 +557,9 @@ function render(alpha) {
   // Unwrap the repeating ground coordinate before interpolating across its seam.
   const groundTravel = (groundOffset - previousGroundOffset + 336) % 336;
   const smoothGround = (previousGroundOffset + groundTravel * alpha) % 336;
-  for (let x = -smoothGround; x < width; x += 336) draw("base.png", x, floor);
+  for (let x = snapMotion(-smoothGround, viewOffsetX); x < width; x += 336) {
+    ctx.drawImage(art["base.png"], x, floor);
+  }
   if (state === "ready") draw("splash.png", (width - 188) / 2, 100);
   // Use the actual game sprite font for the countdown instead of an HTML overlay.
   // The count is placed above GET READY so neither the bird nor the TAP art is obscured.
