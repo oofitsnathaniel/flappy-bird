@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<title>Flappy Bird</title>
+<title>Flappy Bird - Safari Smooth Test</title>
 <style>
 * { box-sizing: border-box; }
 html, body { margin: 0; width: 100%; height: 100%; height: 100dvh; overflow: hidden; background: #4ec0ca; overscroll-behavior: none; }
@@ -274,7 +274,47 @@ const speed = 4;
 const spacing = 144;
 const stepMs = 1000 / 30;
 const art = {};
-const sounds = {};
+// Decoded once; each flap plays a lightweight Web Audio buffer source.
+const audioBuffers = new Map();
+let audioContext = null;
+let audioDecoding = null;
+const AudioContextType = window.AudioContext || window.webkitAudioContext;
+
+function decodeEmbeddedSound(data) {
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+function prepareGameAudio() {
+  if (audioDecoding || !AudioContextType) return audioDecoding;
+  try {
+    audioContext = new AudioContextType();
+    const supportsOgg = !!document.createElement("audio").canPlayType('audio/ogg; codecs="vorbis"');
+    const extension = supportsOgg ? ".ogg" : ".m4a";
+    const entries = Object.entries(assets).filter(([name]) => name.endsWith(extension));
+    audioDecoding = Promise.allSettled(entries.map(async ([name, data]) => {
+      const key = name.replace("sounds/sfx_", "").replace(/\.(ogg|m4a)$/, "").replace("swooshing", "swoosh");
+      const buffer = await audioContext.decodeAudioData(decodeEmbeddedSound(data));
+      audioBuffers.set(key, buffer);
+    }));
+  } catch (error) {
+    console.warn("Web Audio could not initialize:", error);
+  }
+  return audioDecoding;
+}
+
+// iOS Safari requires resume() to be called during a real user gesture.
+function unlockGameAudio() {
+  if (!audioContext) return;
+  if (audioContext.state === "suspended") {
+    audioContext.resume().catch(onAudioError);
+  }
+}
+document.addEventListener("pointerdown", unlockGameAudio, {capture:true, passive:true});
+document.addEventListener("keydown", unlockGameAudio, {capture:true});
+
 const birdFrames = ["up", "mid", "down", "mid"];
 const birdFrameArt = {};
 const backgroundPatterns = {};
@@ -351,11 +391,13 @@ function reset() {
 }
 
 function play(name) {
-  const sound = sounds[name];
-  if (!sound) return;
-  sound.currentTime = 0;
-  const started = sound.play();
-  if (started) started.catch(onAudioError);
+  if (!audioContext || audioContext.state !== "running") return;
+  const buffer = audioBuffers.get(name);
+  if (!buffer) return; // A first tap may arrive before decoding finishes.
+  const source = audioContext.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audioContext.destination);
+  source.start(0);
 }
 
 function addPipe(x) {
@@ -477,14 +519,9 @@ function draw(name, x, y) {
   ctx.drawImage(art[name], Math.round(x), Math.round(y));
 }
 
-function snapMotion(position, offset) {
-  if (!isMobileDevice) return Math.round(position);
-  return (Math.round(position * renderScale + offset) - offset) / renderScale;
-}
-
 function drawPipe(pipe, alpha) {
-  const x = snapMotion(pipe.previousX + (pipe.x - pipe.previousX) * alpha, viewOffsetX);
-  ctx.drawImage(art[pipeArt], x, pipe.top + gap);
+  const x = Math.round(pipe.previousX + (pipe.x - pipe.previousX) * alpha);
+  draw(pipeArt, x, pipe.top + gap);
   ctx.save();
   ctx.translate(x + pipeWidth, pipe.top);
   ctx.rotate(Math.PI);
@@ -494,7 +531,7 @@ function drawPipe(pipe, alpha) {
 
 function drawBird(alpha) {
   ctx.save();
-  ctx.translate(birdX, snapMotion(previousY + (y - previousY) * alpha, viewOffsetY));
+  ctx.translate(birdX, Math.round(previousY + (y - previousY) * alpha));
   ctx.rotate((previousAngle + (angle - previousAngle) * alpha) * Math.PI / 180);
   ctx.drawImage(birdFrameArt[color][flapFrame], -17, -12);
   ctx.restore();
@@ -557,9 +594,7 @@ function render(alpha) {
   // Unwrap the repeating ground coordinate before interpolating across its seam.
   const groundTravel = (groundOffset - previousGroundOffset + 336) % 336;
   const smoothGround = (previousGroundOffset + groundTravel * alpha) % 336;
-  for (let x = snapMotion(-smoothGround, viewOffsetX); x < width; x += 336) {
-    ctx.drawImage(art["base.png"], x, floor);
-  }
+  for (let x = -smoothGround; x < width; x += 336) draw("base.png", x, floor);
   if (state === "ready") draw("splash.png", (width - 188) / 2, 100);
   // Use the actual game sprite font for the countdown instead of an HTML overlay.
   // The count is placed above GET READY so neither the bird nor the TAP art is obscured.
@@ -666,19 +701,13 @@ window.addEventListener("resize", resize);
 window.addEventListener("orientationchange", () => requestAnimationFrame(resize));
 
 async function start() {
+  prepareGameAudio();
   await Promise.all(Object.entries(assets).map(async ([name, data]) => {
     if (name.endsWith(".png")) {
       const sprite = new Image();
       sprite.src = "data:image/png;base64," + data;
       await sprite.decode();
       art[name] = sprite;
-    } else if (name.endsWith(".ogg") || name.endsWith(".m4a")) {
-      // Safari on iPhone uses AAC, while other browsers retain the original OGG files.
-      const useAAC = !document.createElement("audio").canPlayType('audio/ogg; codecs="vorbis"');
-      if ((useAAC && !name.endsWith(".m4a")) || (!useAAC && !name.endsWith(".ogg"))) return;
-      const key = name.replace("sounds/sfx_", "").replace(/\.(ogg|m4a)$/, "").replace("swooshing", "swoosh");
-      sounds[key] = new Audio((useAAC ? "data:audio/mp4;base64," : "data:audio/ogg;base64,") + data);
-      sounds[key].preload = "auto";
     }
   }));
   for (const birdColor of ["yellow", "red", "blue"]) {
@@ -698,7 +727,7 @@ async function start() {
   let previousDraw = 0;
   lastMetricsTime = previous;
   function frame(now) {
-    pollGamepad();
+    if (!isMobileDevice) pollGamepad();
     if(countdownPending){
       const remaining=Math.max(0,countdownUntil-now);
       if(remaining<=0){countdownPending=false;countdownEl.hidden=true;act();}
@@ -717,8 +746,9 @@ async function start() {
     if(menuOpen) elapsed=0;
     // requestAnimationFrame stays synchronized to display refresh on Auto.
     // Explicit caps skip drawing only; physics keeps its original cadence.
+    // Auto uses a 60 FPS mobile target instead of unbounded ProMotion redraws.
     const requestedLimit = frameLimit === "auto" ? 0 : Number(frameLimit);
-    const effectiveLimit = lowPower && !isMobileDevice ? Math.min(60, requestedLimit || 60) : requestedLimit;
+    const effectiveLimit = lowPower ? (requestedLimit ? Math.min(60, requestedLimit) : 60) : requestedLimit;
     const drawInterval = effectiveLimit ? 1000 / effectiveLimit : 0;
     if (!previousDraw || now - previousDraw >= drawInterval - 0.5) {
       if (previousDraw && !paused) {
