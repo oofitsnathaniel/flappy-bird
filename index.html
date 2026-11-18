@@ -89,6 +89,11 @@ button:focus-visible, select:focus-visible { outline: 2px solid white; outline-o
 #display-settings,#performance-settings {z-index:3}
 @media(max-width:520px){#menu-button{right:6px;bottom:45px}.menu-card{padding:13px}.menu-actions{gap:7px}}
 
+/* Keep the game surface fixed as iPhone Safari browser controls expand/collapse.
+   100dvh follows browser chrome motion; 100svh remains stable during taps. */
+@supports (height: 100svh) {
+  html:has(body.mobile-device), body.mobile-device { height:100svh; }
+}
 /* Touch layout: uncluttered playfield; Settings remains available through Menu. */
 body.mobile-device #display-settings,
 body.mobile-device #performance-settings,
@@ -249,6 +254,7 @@ const frameHistory = new Float64Array(360);
 let frameHistoryCount = 0, frameHistoryNext = 0;
 let ticksObserved = 0, lastMetricsTime = 0, measuredPhysicsHz = 0;
 let lastDisplayWidth = 0, lastDisplayHeight = 0;
+let inputScaleX = 1, inputScaleY = 1;
 const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
   (navigator.maxTouchPoints > 1 && matchMedia("(pointer:coarse)").matches);
 if (isMobileDevice) {
@@ -312,8 +318,10 @@ function unlockGameAudio() {
     audioContext.resume().catch(onAudioError);
   }
 }
-document.addEventListener("pointerdown", unlockGameAudio, {capture:true, passive:true});
-document.addEventListener("keydown", unlockGameAudio, {capture:true});
+// A single user gesture unlock is enough in the normal case; don't process
+// an extra document-level audio handler on every flap.
+document.addEventListener("pointerdown", unlockGameAudio, {capture:true, passive:true, once:true});
+document.addEventListener("keydown", unlockGameAudio, {capture:true, once:true});
 
 const birdFrames = ["up", "mid", "down", "mid"];
 const birdFrameArt = {};
@@ -338,6 +346,10 @@ function resize() {
   const deviceRatio = window.devicePixelRatio || 1;
   const pixelRatio = isMobileDevice || lowPower ? Math.min(deviceRatio, 1.5) : deviceRatio;
   lastDisplayWidth = viewportWidth; lastDisplayHeight = viewportHeight;
+  // Cache the hit-test conversion on resize. Reading clientWidth/clientHeight in
+  // every pointerdown can force an expensive layout flush on iOS Safari.
+  inputScaleX = (Math.round(viewportWidth * pixelRatio)) / viewportWidth;
+  inputScaleY = (Math.round(viewportHeight * pixelRatio)) / viewportHeight;
   const backingWidth = Math.round(viewportWidth * pixelRatio);
   const backingHeight = Math.round(viewportHeight * pixelRatio);
   // Assigning the same canvas dimensions clears and reallocates its buffer.
@@ -668,8 +680,9 @@ document.addEventListener("fullscreenchange", () => {
 canvas.addEventListener("pointerdown", event => {
   if (event.button !== 0 || menuOpen || countdownPending) return;
   event.preventDefault();
-  const px = event.offsetX / canvas.clientWidth * canvas.width;
-  const py = event.offsetY / canvas.clientHeight * canvas.height;
+  // No DOM measurements or canvas reflows during a flap.
+  const px = event.offsetX * inputScaleX;
+  const py = event.offsetY * inputScaleY;
   if (px < viewOffsetX || px > viewOffsetX + viewPixelWidth ||
       py < viewOffsetY || py > viewOffsetY + viewPixelHeight) return;
   if (state === "results") {
